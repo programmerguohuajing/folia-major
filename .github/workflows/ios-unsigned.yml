@@ -43,8 +43,18 @@ jobs:
         run: npm install --no-save @capacitor/cli@7 @capacitor/core@7 @capacitor/ios@7
 
       - name: Create Capacitor iOS project
+        # Do NOT use `cap init`: it writes capacitor.config.ts, which the
+        # Capacitor CLI cannot parse in this repo because package.json sets
+        # "type": "module" (TypeError reading 'CommonJS'). A JSON config
+        # loads fine.
         run: |
-          npx cap init Folia top.izuna.foliamajor --web-dir=dist
+          cat > capacitor.config.json <<'EOF'
+          {
+            "appId": "top.izuna.foliamajor",
+            "appName": "Folia",
+            "webDir": "dist"
+          }
+          EOF
           npx cap add ios
           npx cap sync ios
 
