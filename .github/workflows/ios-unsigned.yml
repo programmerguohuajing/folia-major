@@ -62,11 +62,17 @@ jobs:
         run: |
           if [ -f ios/App/Podfile ]; then
             cd ios/App && pod install
+          else
+            echo 'No Podfile found under ios/App, skipping pod install'
           fi
 
       - name: Build unsigned .app
+        # With CocoaPods, the Capacitor framework lives in the Pods target,
+        # so the build MUST use App.xcworkspace, not App.xcodeproj (the
+        # latter fails with "unable to resolve module dependency:
+        # 'Capacitor'").
         run: |
-          xcodebuild -project ios/App/App.xcodeproj \
+          xcodebuild -workspace ios/App/App.xcworkspace \
             -scheme App \
             -configuration Release \
             -sdk iphoneos \
