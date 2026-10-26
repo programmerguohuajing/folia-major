@@ -1,0 +1,84 @@
+# Build an UNSIGNED iOS IPA for Folia via Capacitor (self-signing).
+#
+# Folia upstream has no iOS target: this wraps the plain Vite web build
+# in a Capacitor iOS shell. No online-music backend is bundled: the web
+# build's API bases (VITE_NETEASE_API_BASE / VITE_KUGOU_API_BASE /
+# VITE_QQ_API_BASE) are empty by default, so online sources need a
+# self-hosted API instance baked in at build time. Local music and
+# Navidrome work without one.
+#
+# The IPA is deliberately UNSIGNED (CODE_SIGNING_ALLOWED=NO): sign it
+# yourself with AltStore / SideStore / ESign using your own Apple ID
+# (free accounts get a 7-day certificate).
+name: iOS unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ios-capacitor]
+
+jobs:
+  build-ipa:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web app (relative base for Capacitor)
+        # Skip the vercel-api step: it is server-only and irrelevant for iOS.
+        # --base ./ overrides vite.config.ts ('/') so assets load from the
+        # Capacitor local web server instead of an absolute path.
+        run: npx vite build --base ./
+
+      - name: Install Capacitor (no dependency changes committed)
+        run: npm install --no-save @capacitor/cli@7 @capacitor/core@7 @capacitor/ios@7
+
+      - name: Create Capacitor iOS project
+        run: |
+          npx cap init Folia top.izuna.foliamajor --web-dir=dist
+          npx cap add ios
+          npx cap sync ios
+
+      - name: Install CocoaPods dependencies (only if a Podfile exists)
+        run: |
+          if [ -f ios/App/Podfile ]; then
+            cd ios/App && pod install
+          fi
+
+      - name: Build unsigned .app
+        run: |
+          xcodebuild -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Package unsigned IPA
+        run: |
+          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name 'App.app' -path '*Release-iphoneos*' | head -n 1)
+          echo "App.app at: $APP_PATH"
+          test -n "$APP_PATH" || { echo 'App.app not found under DerivedData'; exit 1; }
+          rm -rf Payload Folia-unsigned.ipa
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
+          zip -r Folia-unsigned.ipa Payload
+          ls -lh Folia-unsigned.ipa
+          unzip -l Folia-unsigned.ipa | head -n 30
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: folia-ios-unsigned
+          path: Folia-unsigned.ipa
+          if-no-files-found: error
